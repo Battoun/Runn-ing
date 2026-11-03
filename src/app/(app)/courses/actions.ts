@@ -39,6 +39,15 @@ export async function saveRace(form: FormData) {
     registered: form.get("registered") === "on",
     elevationGain: intOrUndef(form.get("elevationGain")),
     elevationLoss: intOrUndef(form.get("elevationLoss")),
+    rankOverall: intOrUndef(form.get("rankOverall")),
+    finishersOverall: intOrUndef(form.get("finishersOverall")),
+    category: String(form.get("category") ?? "").trim().slice(0, 30) || undefined,
+    rankCategory: intOrUndef(form.get("rankCategory")),
+    finishersCategory: intOrUndef(form.get("finishersCategory")),
+    rankGender: intOrUndef(form.get("rankGender")),
+    finishersGender: intOrUndef(form.get("finishersGender")),
+    feeling: [1, 2, 3, 4, 5].includes(Number(form.get("feeling"))) ? Number(form.get("feeling")) : undefined,
+    resultsUrl: /^https?:\/\//.test(String(form.get("resultsUrl") ?? "")) ? String(form.get("resultsUrl")) : undefined,
     terrain: RACE_TERRAINS.includes(String(form.get("terrain")) as RaceTerrain) ? (String(form.get("terrain")) as RaceTerrain) : "Route",
   };
   updateDb((db) => {

@@ -60,6 +60,16 @@ export type Race = {
   elevationGain?: number; // m D+
   elevationLoss?: number; // m D-
   terrain?: RaceTerrain;
+  // résultat
+  rankOverall?: number;
+  finishersOverall?: number;
+  category?: string; // ex : SEH, M0H
+  rankCategory?: number;
+  finishersCategory?: number;
+  rankGender?: number;
+  finishersGender?: number;
+  feeling?: number; // 1 à 5
+  resultsUrl?: string;
 };
 
 export const RACE_TERRAINS = ["Route", "Trail", "Piste", "Cross"] as const;

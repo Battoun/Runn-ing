@@ -4,7 +4,7 @@ import { getActivities } from "@/lib/data";
 import { predict } from "@/lib/stats";
 import { dateKey, daysBetween, fmtDate, fmtDuration, fmtPace, parseKey } from "@/lib/format";
 import { RACE_TERRAINS, type Race } from "@/lib/types";
-import { effortKm, hasElevation, profileLabel, raceSpecs } from "@/lib/races";
+import { FEELINGS, MEDAL, effortKm, hasElevation, ordinal, profileLabel, raceSpecs, rankings, topPct } from "@/lib/races";
 import { Card, PageHeader } from "@/components/ui";
 import { deleteRace, saveRace } from "./actions";
 import { budgetByYear, fmtEuro, raceCost } from "@/lib/budget";
@@ -51,6 +51,7 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
       )}
 
       <h2 className="eyebrow mb-3">Passées ({past.length})</h2>
+      <PastSummary races={past} />
       <div className="card divide-y divide-[var(--border)]">
         {past.map((r) => (
           <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
@@ -59,6 +60,23 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
               <div className="text-xs text-ink-2">
                 {fmtDate(r.date, { day: "numeric", month: "long", year: "numeric" })} · {raceSpecs(r)}{r.location ? ` · ${r.location}` : ""}
               </div>
+              {(rankings(r).length > 0 || r.feeling) && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                  {rankings(r).map((k) => (
+                    <span key={k.label} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5">
+                      {MEDAL[k.rank] && <span>{MEDAL[k.rank]}</span>}
+                      <span className="text-muted">{k.label}</span>
+                      <span className="font-semibold">{ordinal(k.rank)}</span>
+                      {k.total && <span className="text-ink-2">/ {k.total}</span>}
+                      {k.top != null && <span className="text-muted">· top {k.top} %</span>}
+                    </span>
+                  ))}
+                  {r.feeling && <span className="text-ink-2">{FEELINGS[r.feeling]}</span>}
+                  {r.resultsUrl && (
+                    <a href={r.resultsUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">Résultats ↗</a>
+                  )}
+                </div>
+              )}
             </div>
             <div className="text-right text-sm">
               {raceCost(r) > 0 && <div className="text-xs text-muted">{fmtEuro(raceCost(r))}</div>}
@@ -69,6 +87,12 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
                     {fmtPace(r.resultTime / r.distanceKm)}/km
                     {r.goalTime ? (r.resultTime <= r.goalTime ? " · objectif atteint ✓" : ` · +${fmtDuration(r.resultTime - r.goalTime)}`) : ""}
                   </div>
+                  <Link href={`?edit=${r.id}`} className="mt-1 inline-flex items-center gap-1 text-xs text-accent hover:underline" aria-label={`Modifier ${r.name}`}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" />
+                    </svg>
+                    Modifier
+                  </Link>
                 </>
               ) : (
                 <Link href={`?edit=${r.id}`} className="text-xs text-accent underline">Saisir mon temps</Link>
@@ -102,7 +126,6 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
                   <th className="px-4 py-3 font-semibold text-right">Frais annexes</th>
                   <th className="px-4 py-3 font-semibold text-right">Total</th>
                   <th className="px-4 py-3 font-semibold text-right hidden md:table-cell">Prix moy.</th>
-                  <th className="px-4 py-3 font-semibold text-right hidden md:table-cell">€ / km</th>
                 </tr>
               </thead>
               <tbody>
@@ -121,13 +144,12 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
                       {b.planned > 0 && <div className="text-[11px] text-muted">dont {fmtEuro(b.planned)} prévus</div>}
                     </td>
                     <td className="px-4 py-2.5 text-right hidden md:table-cell">{b.avgPrice != null ? fmtEuro(b.avgPrice) : "–"}</td>
-                    <td className="px-4 py-2.5 text-right hidden md:table-cell">{b.perKm != null ? `${b.perKm.toFixed(2).replace(".", ",")} €` : "–"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="px-4 py-2 text-[11px] text-muted border-t border-line whitespace-normal">
-              « Prévus » = courses à venir pas encore inscrites. € / km calculé sur le prix d&apos;inscription.
+              « Prévus » = courses à venir pas encore inscrites.
             </p>
           </div>
         </div>
@@ -278,10 +300,6 @@ function RaceForm({ race }: { race?: Race }) {
           </select>
         </div>
         <div>
-          <label className="label">Temps réalisé</label>
-          <input className="input" name="resultTime" defaultValue={race?.resultTime ? fmtDuration(race.resultTime).replace("h", ":").replace("'", ":") : ""} placeholder="après la course" />
-        </div>
-        <div>
           <label className="label">Prix d&apos;inscription (€)</label>
           <input className="input" name="price" inputMode="decimal" defaultValue={race?.price} placeholder="ex : 35" />
         </div>
@@ -303,6 +321,33 @@ function RaceForm({ race }: { race?: Race }) {
           <label className="label">Notes</label>
           <textarea className="input min-h-[70px]" name="notes" defaultValue={race?.notes} placeholder="Retrait dossard, logistique, stratégie de course…" />
         </div>
+        <fieldset className="md:col-span-3 rounded-xl border border-line p-4 grid md:grid-cols-3 gap-3">
+          <legend className="px-1 text-xs font-semibold text-ink-2">🏁 Résultat (après la course)</legend>
+          <div>
+            <label className="label">Temps réalisé</label>
+            <input className="input" name="resultTime" defaultValue={race?.resultTime ? fmtDuration(race.resultTime).replace("h", ":").replace("'", ":") : ""} placeholder="h:mm:ss ou mm:ss" />
+          </div>
+          <RankInput label="Classement scratch" name="Overall" rank={race?.rankOverall} total={race?.finishersOverall} />
+          <RankInput label="Classement H/F" name="Gender" rank={race?.rankGender} total={race?.finishersGender} />
+          <div>
+            <label className="label">Catégorie</label>
+            <input className="input" name="category" defaultValue={race?.category} placeholder="ex : SEH, M0H" />
+          </div>
+          <RankInput label="Classement catégorie" name="Category" rank={race?.rankCategory} total={race?.finishersCategory} />
+          <div>
+            <label className="label">Ressenti</label>
+            <select className="input" name="feeling" defaultValue={race?.feeling ?? ""}>
+              <option value="">–</option>
+              {FEELINGS.slice(1).map((f, i) => (
+                <option key={f} value={i + 1}>{f}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <label className="label">Lien des résultats</label>
+            <input className="input" name="resultsUrl" type="url" defaultValue={race?.resultsUrl} placeholder="https://" />
+          </div>
+        </fieldset>
         <div className="md:col-span-3 flex gap-2">
           <button className="btn">{race ? "Enregistrer" : "Ajouter la course"}</button>
         </div>
@@ -314,5 +359,52 @@ function RaceForm({ race }: { race?: Race }) {
         </form>
       )}
     </Card>
+  );
+}
+
+function RankInput({ label, name, rank, total }: { label: string; name: string; rank?: number; total?: number }) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex items-center gap-1.5">
+        <input className="input" name={`rank${name}`} inputMode="numeric" defaultValue={rank} placeholder="place" aria-label={`${label} : place`} />
+        <span className="text-muted text-sm">/</span>
+        <input className="input" name={`finishers${name}`} inputMode="numeric" defaultValue={total} placeholder="arrivants" aria-label={`${label} : nombre d'arrivants`} />
+      </div>
+    </div>
+  );
+}
+
+function PastSummary({ races }: { races: Race[] }) {
+  const done = races.filter((r) => r.resultTime || r.rankOverall);
+  if (!done.length) return null;
+  const podiums = races.filter((r) => [r.rankOverall, r.rankGender, r.rankCategory].some((x) => x && x <= 3)).length;
+  const tops = races.map((r) => topPct(r.rankOverall, r.finishersOverall)).filter((x): x is number => x != null);
+  const best = races
+    .filter((r) => r.rankOverall)
+    .sort((a, b) => (topPct(a.rankOverall, a.finishersOverall) ?? 101) - (topPct(b.rankOverall, b.finishersOverall) ?? 101) || a.rankOverall! - b.rankOverall!)[0];
+  const goals = races.filter((r) => r.goalTime && r.resultTime);
+  const reached = goals.filter((r) => r.resultTime! <= r.goalTime!).length;
+  const tiles = [
+    { l: "Courses terminées", v: String(done.length) },
+    { l: "Podiums", v: podiums ? `${podiums} 🏆` : "0", s: "scratch, sexe ou catégorie" },
+    { l: "Top moyen (scratch)", v: tops.length ? `${Math.round(tops.reduce((a, b) => a + b, 0) / tops.length)} %` : "–" },
+    {
+      l: "Meilleur classement",
+      v: best ? `${ordinal(best.rankOverall!)}${best.finishersOverall ? ` / ${best.finishersOverall}` : ""}` : "–",
+      s: best?.name,
+    },
+    { l: "Objectifs atteints", v: goals.length ? `${reached} / ${goals.length}` : "–" },
+  ];
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+      {tiles.map((t) => (
+        <div key={t.l} className="card p-3">
+          <div className="text-[11px] text-muted">{t.l}</div>
+          <div className="font-semibold">{t.v}</div>
+          {t.s && <div className="text-[11px] text-ink-2 truncate">{t.s}</div>}
+        </div>
+      ))}
+    </div>
   );
 }

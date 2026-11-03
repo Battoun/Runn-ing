@@ -20,3 +20,20 @@ export function profileLabel(r: Race) {
   const label = m < 10 ? "Plat" : m < 25 ? "Vallonné" : m < 50 ? "Montagneux" : "Très technique / raide";
   return { perKm: Math.round(m), label };
 }
+
+export const ordinal = (n: number) => (n === 1 ? "1er" : `${n}e`);
+
+export const MEDAL: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+export const FEELINGS = ["", "😫 Très dur", "😕 Difficile", "😐 Correct", "🙂 Bien", "🤩 Excellent"];
+
+/** Top x % (arrondi vers le haut, min 1 %) */
+export const topPct = (rank?: number, total?: number) => (rank && total && total >= rank ? Math.max(1, Math.ceil((rank / total) * 100)) : null);
+
+export function rankings(r: Race) {
+  const out: { label: string; rank: number; total?: number; top: number | null }[] = [];
+  if (r.rankOverall) out.push({ label: "Scratch", rank: r.rankOverall, total: r.finishersOverall, top: topPct(r.rankOverall, r.finishersOverall) });
+  if (r.rankGender) out.push({ label: "Sexe", rank: r.rankGender, total: r.finishersGender, top: topPct(r.rankGender, r.finishersGender) });
+  if (r.rankCategory) out.push({ label: r.category || "Catégorie", rank: r.rankCategory, total: r.finishersCategory, top: topPct(r.rankCategory, r.finishersCategory) });
+  return out;
+}
