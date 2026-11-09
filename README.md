@@ -33,9 +33,10 @@ Tant que Strava n'est pas connecté, le site affiche des données de démo.
 | Tableau de bord | km semaine/mois/année, objectif hebdo, charge 7 j / 28 j, prochaine course (J-x, prédiction), météo + meilleur créneau, graphiques volume & allure, séances à venir, dernières sorties, meilleures allures |
 | Calendrier | vue mois, séances planifiées par type, sorties réalisées, courses, total par semaine, glisser-déposer, répétition hebdo, cocher « faite » |
 | Activités | historique filtrable (période, recherche) avec totaux |
-| Courses | objectifs à venir (allure cible, prédiction vs objectif), historique et résultats |
+| Courses | objectifs à venir (réalisme de l'objectif, météo J-15, chaussures), historique, résultats et catégorie FFA auto, lien avec la sortie Strava |
+| Découvrir | prochaines courses des Hauts-de-France (calendrier Adeorun), à trier 👍 / 😐 / 👎, ajout direct à mes courses |
 | Outils | allure, prédicteur Riegel, zones VMA, zones FC (Karvonen), plan de passage, allure ↔ km/h |
-| Paramètres | Strava, profil (objectif hebdo, VMA, FC, ville météo), mot de passe |
+| Paramètres | Strava, profil (objectif hebdo, VMA, FC, date de naissance, ville météo / distances), mot de passe |
 
 ## Technique
 

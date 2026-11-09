@@ -47,8 +47,49 @@ export async function getWeather(lat?: number, lon?: number, city?: string): Pro
   }
 }
 
+export type RaceWeather = { place: string; tMin: number; tMax: number; rain: number; wind: number; code: number };
+
+/** Prévision du jour de course (Open-Meteo, disponible jusqu'à J-15) au lieu de la course, sinon à ta ville */
+export async function getRaceWeather(date: string, location?: string, fallback?: { lat?: number; lon?: number; city?: string }): Promise<RaceWeather | null> {
+  try {
+    const place = location ? await geocodeNear(location, fallback?.lat, fallback?.lon) : null;
+    const lat = place?.lat ?? fallback?.lat;
+    const lon = place?.lon ?? fallback?.lon;
+    if (lat == null || lon == null) return null;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_min,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max,weather_code&timezone=auto&start_date=${date}&end_date=${date}`;
+    const res = await fetch(url, { next: { revalidate: 3600 } });
+    if (!res.ok) return null;
+    const d = (await res.json()).daily;
+    if (!d?.time?.length || d.temperature_2m_max[0] == null) return null;
+    return {
+      place: place?.city ?? fallback?.city ?? "",
+      tMin: Math.round(d.temperature_2m_min[0]),
+      tMax: Math.round(d.temperature_2m_max[0]),
+      rain: d.precipitation_probability_max[0] ?? 0,
+      wind: Math.round(d.wind_speed_10m_max[0]),
+      code: d.weather_code[0],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Homonymes (Guines / Güines…) : on garde le résultat le plus proche de ta ville */
+async function geocodeNear(name: string, lat?: number, lon?: number) {
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=10&language=fr`, {
+    next: { revalidate: 86400 },
+  });
+  if (!res.ok) return null;
+  const results = ((await res.json()).results ?? []) as { latitude: number; longitude: number; name: string; country?: string }[];
+  const dist = (r: (typeof results)[number]) => (lat == null || lon == null ? 0 : (r.latitude - lat) ** 2 + (r.longitude - lon) ** 2);
+  const r = results.sort((a, b) => dist(a) - dist(b))[0];
+  return r ? { lat: r.latitude, lon: r.longitude, city: r.name } : null;
+}
+
 export async function geocode(city: string) {
-  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=fr`);
+  const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=fr`, {
+    next: { revalidate: 86400 },
+  });
   if (!res.ok) return null;
   const j = await res.json();
   const r = j.results?.[0];

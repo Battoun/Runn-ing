@@ -1,11 +1,28 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
-import { getActivities } from "@/lib/data";
+import { getActivities, getRaceWeather, weatherIcon, type RaceWeather } from "@/lib/data";
+import { getActivityDetail } from "@/lib/strava";
+import { wear } from "@/lib/gear";
 import { predict } from "@/lib/stats";
 import { dateKey, daysBetween, fmtDate, fmtDuration, fmtPace, parseKey } from "@/lib/format";
-import { RACE_TERRAINS, type Race } from "@/lib/types";
-import { FEELINGS, MEDAL, effortKm, hasElevation, ordinal, profileLabel, raceSpecs, rankings, topPct } from "@/lib/races";
-import { Card, PageHeader } from "@/components/ui";
+import { RACE_CATEGORIES, RACE_TERRAINS, type Activity, type Gear, type Race } from "@/lib/types";
+import {
+  FEELINGS,
+  MEDAL,
+  effortKm,
+  goalCheck,
+  hasElevation,
+  ordinal,
+  profileLabel,
+  raceActivity,
+  raceActivityCandidates,
+  raceSpecs,
+  raceCategory,
+  rankings,
+  topPct,
+  type GoalCheck,
+} from "@/lib/races";
+import { Card, PageHeader, StatusPill } from "@/components/ui";
 import { deleteRace, saveRace } from "./actions";
 import { budgetByYear, fmtEuro, raceCost } from "@/lib/budget";
 import { YearBudgetChart } from "@/components/Charts";
@@ -22,12 +39,38 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
   const db = readDb();
   const { activities } = getActivities();
   const today = dateKey(new Date());
-  const upcoming = db.races.filter((r) => r.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-  const past = db.races.filter((r) => r.date < today).sort((a, b) => b.date.localeCompare(a.date));
+  // catégorie non saisie : calculée d'après la date de naissance (Paramètres)
+  const birthDate = db.settings.profile.birthDate;
+  const races = db.races.map((r) => (r.category ? r : { ...r, category: raceCategory(r.date, birthDate) }));
+  const upcoming = races.filter((r) => r.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+  const past = races.filter((r) => r.date < today).sort((a, b) => b.date.localeCompare(a.date));
   const editing = sp.edit ? db.races.find((r) => r.id === sp.edit) : undefined;
   const showForm = Boolean(editing || sp.new);
   const budget = budgetByYear(db.races, today);
   const toPay = upcoming.filter((r) => !r.registered && r.price);
+  const shoes = (db.gear ?? []).filter((g) => g.kind === "Chaussures");
+  const raceShoe = (r: Race, a?: Activity) => shoes.find((g) => g.id === (r.gearId ?? a?.gearId));
+
+  // courses passées : sortie Strava du jour + splits (mis en cache après le 1er chargement)
+  const pastInfo = new Map(
+    await Promise.all(
+      past.map(async (r) => {
+        const activity = raceActivity(r, activities);
+        const detail = activity ? await getActivityDetail(activity.id) : null;
+        return [r.id, { activity, detail }] as const;
+      }),
+    ),
+  );
+  // courses à venir : réalisme de l'objectif + météo du jour J (prévision dispo à J-15)
+  const upcomingInfo = new Map(
+    await Promise.all(
+      upcoming.map(async (r) => {
+        const soon = daysBetween(new Date(), parseKey(r.date)) <= 15;
+        const weather = soon ? await getRaceWeather(r.date, r.location, db.settings.profile) : null;
+        return [r.id, { check: goalCheck(r, activities, db.races), weather }] as const;
+      }),
+    ),
+  );
 
   return (
     <>
@@ -37,13 +80,29 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
         action={!showForm && <Link href="?new=1" className="btn">+ Ajouter une course</Link>}
       />
 
-      {showForm && <RaceForm race={editing} />}
+      {showForm && (
+        <RaceForm
+          race={editing}
+          birthDate={birthDate}
+          shoes={shoes}
+          candidates={editing ? raceActivityCandidates(editing, activities) : []}
+          detected={editing && editing.activityId === undefined ? raceActivity(editing, activities) : undefined}
+          stravaTime={editing ? pastInfo.get(editing.id)?.detail?.elapsedTime : undefined}
+        />
+      )}
 
       <h2 className="eyebrow mb-3">À venir ({upcoming.length})</h2>
       {upcoming.length ? (
         <div className="grid md:grid-cols-2 gap-4 mb-8">
           {upcoming.map((r) => (
-            <RaceCard key={r.id} race={r} prediction={predict(activities, effortKm(r))} />
+            <RaceCard
+              key={r.id}
+              race={r}
+              prediction={predict(activities, effortKm(r))}
+              check={upcomingInfo.get(r.id)?.check ?? null}
+              weather={upcomingInfo.get(r.id)?.weather ?? null}
+              shoe={raceShoe(r)}
+            />
           ))}
         </div>
       ) : (
@@ -53,14 +112,18 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
       <h2 className="eyebrow mb-3">Passées ({past.length})</h2>
       <PastSummary races={past} />
       <div className="card divide-y divide-[var(--border)]">
-        {past.map((r) => (
-          <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-3">
+        {past.map((r) => {
+          const info = pastInfo.get(r.id);
+          const shoe = raceShoe(r, info?.activity);
+          return (
+          <div key={r.id} className="px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <div className="font-medium text-sm">{r.name}</div>
               <div className="text-xs text-ink-2">
                 {fmtDate(r.date, { day: "numeric", month: "long", year: "numeric" })} · {raceSpecs(r)}{r.location ? ` · ${r.location}` : ""}
               </div>
-              {(rankings(r).length > 0 || r.feeling) && (
+              {(rankings(r).length > 0 || r.feeling || shoe || info?.activity) && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
                   {rankings(r).map((k) => (
                     <span key={k.label} className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5">
@@ -72,8 +135,14 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
                     </span>
                   ))}
                   {r.feeling && <span className="text-ink-2">{FEELINGS[r.feeling]}</span>}
+                  {shoe && <span className="text-ink-2">· 👟 {shoe.name}</span>}
                   {r.resultsUrl && (
                     <a href={r.resultsUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">Résultats ↗</a>
+                  )}
+                  {info?.activity?.source === "strava" && (
+                    <a href={`https://www.strava.com/activities/${info.activity.id.slice(7)}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                      Strava ↗
+                    </a>
                   )}
                 </div>
               )}
@@ -95,11 +164,15 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
                   </Link>
                 </>
               ) : (
-                <Link href={`?edit=${r.id}`} className="text-xs text-accent underline">Saisir mon temps</Link>
+                <Link href={`?edit=${r.id}`} className="text-xs text-accent underline">
+                  {info?.detail ? `Saisir mon temps (Strava : ${fmtDuration(info.detail.elapsedTime)})` : "Saisir mon temps"}
+                </Link>
               )}
             </div>
           </div>
-        ))}
+          </div>
+          );
+        })}
         {!past.length && <p className="px-4 py-6 text-sm text-ink-2">Pas encore d&apos;historique.</p>}
       </div>
 
@@ -160,7 +233,19 @@ export default async function RacesPage({ searchParams }: { searchParams: Promis
   );
 }
 
-function RaceCard({ race, prediction }: { race: Race; prediction: number | null }) {
+function RaceCard({
+  race,
+  prediction,
+  check,
+  weather,
+  shoe,
+}: {
+  race: Race;
+  prediction: number | null;
+  check: GoalCheck | null;
+  weather: RaceWeather | null;
+  shoe?: Gear;
+}) {
   const days = daysBetween(new Date(), parseKey(race.date));
   const diff = race.goalTime && prediction ? prediction - race.goalTime : null;
   return (
@@ -214,6 +299,41 @@ function RaceCard({ race, prediction }: { race: Race; prediction: number | null 
           )}
         </div>
       </div>
+      {check && (
+        <div className="mt-3 rounded-lg border border-line p-3 text-xs">
+          <StatusPill tone={check.tone}>{check.label}</StatusPill>
+          <p className="mt-2 text-ink-2">
+            Niveau actuel ≈ <strong className="text-ink">{fmtDuration(check.reference)}</strong> (d&apos;après {check.source})
+            {check.reachable < check.reference - 1 && (
+              <>, ≈ <strong className="text-ink">{fmtDuration(check.reachable)}</strong> le jour J si l&apos;entraînement suit</>
+            )}
+            .
+          </p>
+          {check.tone !== "good" && (
+            <p className="mt-1">
+              Objectif conseillé : <strong>{fmtDuration(check.suggested)}</strong>
+              {!hasElevation(race) && <span className="text-ink-2"> ({fmtPace(check.suggested / race.distanceKm)}/km)</span>}
+            </p>
+          )}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        {weather ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5" title={`Prévision${weather.place ? ` à ${weather.place}` : ""}`}>
+            {weatherIcon(weather.code)} {weather.tMin}–{weather.tMax} °C · pluie {weather.rain} % · vent {weather.wind} km/h
+          </span>
+        ) : (
+          days > 15 && <span className="text-muted">🌦️ Météo du jour J dispo à J-15</span>
+        )}
+        {weather && weatherTip(weather) && <span className="text-warning">{weatherTip(weather)}</span>}
+        {race.category && <span className="rounded-full border border-line px-2 py-0.5">Catégorie {race.category}</span>}
+        {shoe && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5">
+            👟 {shoe.name}
+            {wear(shoe) && wear(shoe)!.tone !== "good" && <span className="text-warning">· usure {Math.round(wear(shoe)!.pct)} %</span>}
+          </span>
+        )}
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         {race.registered ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 font-medium">
@@ -240,7 +360,31 @@ function RaceCard({ race, prediction }: { race: Race; prediction: number | null 
   );
 }
 
-function RaceForm({ race }: { race?: Race }) {
+function weatherTip(w: RaceWeather) {
+  if (w.tMax >= 22) return "Chaleur : bois avant le départ et pars prudemment";
+  if (w.rain >= 60) return "Pluie probable : coupe-vent et chaussures qui accrochent";
+  if (w.wind >= 30) return "Vent fort : abrite-toi dans un groupe";
+  if (w.tMin <= 2) return "Froid : gants et couche jetable au départ";
+  return null;
+}
+
+function RaceForm({
+  race,
+  birthDate,
+  shoes,
+  candidates,
+  detected,
+  stravaTime,
+}: {
+  race?: Race;
+  birthDate?: string;
+  shoes: Gear[];
+  candidates: Activity[];
+  detected?: Activity;
+  stravaTime?: number;
+}) {
+  const toInput = (sec: number) => fmtDuration(sec).replace("h", ":").replace("'", ":");
+  const shoeOptions = shoes.filter((g) => !g.retired || g.id === race?.gearId);
   const preset = race ? PRESETS.find((p) => Math.abs(Number(p.v) - race.distanceKm) < 0.01)?.v ?? "custom" : "10";
   return (
     <Card title={race ? "Modifier la course" : "Nouvelle course"} className="mb-6" action={<Link href="/courses" className="text-sm text-muted">Annuler</Link>}>
@@ -300,6 +444,15 @@ function RaceForm({ race }: { race?: Race }) {
           </select>
         </div>
         <div>
+          <label className="label">Chaussures</label>
+          <select className="input" name="gearId" defaultValue={race?.gearId ?? ""}>
+            <option value="">{detected?.gearId ? "Celles de la sortie Strava" : "–"}</option>
+            {shoeOptions.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="label">Prix d&apos;inscription (€)</label>
           <input className="input" name="price" inputMode="decimal" defaultValue={race?.price} placeholder="ex : 35" />
         </div>
@@ -325,13 +478,27 @@ function RaceForm({ race }: { race?: Race }) {
           <legend className="px-1 text-xs font-semibold text-ink-2">🏁 Résultat (après la course)</legend>
           <div>
             <label className="label">Temps réalisé</label>
-            <input className="input" name="resultTime" defaultValue={race?.resultTime ? fmtDuration(race.resultTime).replace("h", ":").replace("'", ":") : ""} placeholder="h:mm:ss ou mm:ss" />
+            <input
+              className="input"
+              name="resultTime"
+              defaultValue={race?.resultTime ? toInput(race.resultTime) : stravaTime ? toInput(stravaTime) : ""}
+              placeholder="h:mm:ss ou mm:ss"
+            />
+            {!race?.resultTime && stravaTime && <p className="mt-1 text-[11px] text-muted">Pré-rempli avec le chrono Strava : corrige avec le temps officiel.</p>}
           </div>
           <RankInput label="Classement scratch" name="Overall" rank={race?.rankOverall} total={race?.finishersOverall} />
           <RankInput label="Classement H/F" name="Gender" rank={race?.rankGender} total={race?.finishersGender} />
           <div>
             <label className="label">Catégorie</label>
-            <input className="input" name="category" defaultValue={race?.category} placeholder="ex : SEH, M0H" />
+            <select className="input" name="category" defaultValue={race?.category ?? ""}>
+              <option value="">
+                {birthDate ? `Auto${race && raceCategory(race.date, birthDate) ? ` : ${raceCategory(race.date, birthDate)}` : " (d'après ta date de naissance)"}` : "–"}
+              </option>
+              {RACE_CATEGORIES.map((c) => (
+                <option key={c.v} value={c.v}>{c.l}</option>
+              ))}
+              {race?.category && !RACE_CATEGORIES.some((c) => c.v === race.category) && <option value={race.category}>{race.category}</option>}
+            </select>
           </div>
           <RankInput label="Classement catégorie" name="Category" rank={race?.rankCategory} total={race?.finishersCategory} />
           <div>
@@ -341,6 +508,18 @@ function RaceForm({ race }: { race?: Race }) {
               {FEELINGS.slice(1).map((f, i) => (
                 <option key={f} value={i + 1}>{f}</option>
               ))}
+            </select>
+          </div>
+          <div className="md:col-span-3">
+            <label className="label">Sortie Strava de la course</label>
+            <select className="input" name="activityId" defaultValue={race?.activityId === null ? "none" : race?.activityId ?? "auto"}>
+              <option value="auto">Détection auto{detected ? ` (${detected.name})` : race ? " : aucune sortie trouvée" : ""}</option>
+              {candidates.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {fmtDate(dateKey(new Date(a.date)), { day: "numeric", month: "short" })} · {a.name} · {(a.distance / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km · {fmtDuration(a.movingTime)}
+                </option>
+              ))}
+              <option value="none">Aucune</option>
             </select>
           </div>
           <div className="md:col-span-3">

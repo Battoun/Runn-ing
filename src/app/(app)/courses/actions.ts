@@ -24,6 +24,7 @@ export async function saveRace(form: FormData) {
   const preset = String(form.get("preset") ?? "");
   const distanceKm = Number(String(preset && preset !== "custom" ? preset : form.get("distanceKm")).replace(",", "."));
   const priority = String(form.get("priority") ?? "B");
+  const activity = String(form.get("activityId") ?? "auto");
   const data: Omit<Race, "id"> = {
     name: String(form.get("name") ?? "").slice(0, 120) || "Course",
     date: String(form.get("date")).slice(0, 10),
@@ -48,6 +49,8 @@ export async function saveRace(form: FormData) {
     finishersGender: intOrUndef(form.get("finishersGender")),
     feeling: [1, 2, 3, 4, 5].includes(Number(form.get("feeling"))) ? Number(form.get("feeling")) : undefined,
     resultsUrl: /^https?:\/\//.test(String(form.get("resultsUrl") ?? "")) ? String(form.get("resultsUrl")) : undefined,
+    activityId: activity === "auto" ? undefined : activity === "none" ? null : activity,
+    gearId: String(form.get("gearId") ?? "") || undefined,
     terrain: RACE_TERRAINS.includes(String(form.get("terrain")) as RaceTerrain) ? (String(form.get("terrain")) as RaceTerrain) : "Route",
   };
   updateDb((db) => {

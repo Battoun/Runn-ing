@@ -1,5 +1,5 @@
 import { readDb, updateDb } from "./db";
-import type { Activity, StravaLink } from "./types";
+import type { Activity, ActivityDetail, StravaLink } from "./types";
 
 const RUN_TYPES = new Set(["Run", "TrailRun", "VirtualRun"]);
 
@@ -185,10 +185,49 @@ export async function syncGear(token?: string) {
   return details.length;
 }
 
+type StravaSplit = { distance: number; elapsed_time: number; elevation_difference?: number; average_heartrate?: number };
+
+/** Détail d'une sortie (splits au km), mis en cache dans la base : une course passée ne change plus */
+export async function getActivityDetail(activityId: string): Promise<ActivityDetail | null> {
+  const cached = readDb().activityDetails?.[activityId];
+  if (cached) return cached;
+  if (!activityId.startsWith("strava-") || !readDb().settings.strava) return null;
+  try {
+    const token = await validToken();
+    const res = await fetch(`https://www.strava.com/api/v3/activities/${activityId.slice(7)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const a = await res.json();
+    const detail: ActivityDetail = {
+      elapsedTime: a.elapsed_time,
+      movingTime: a.moving_time,
+      distance: a.distance,
+      elevation: a.total_elevation_gain,
+      avgHr: a.average_heartrate,
+      splits: ((a.splits_metric ?? []) as StravaSplit[]).map((x) => ({
+        distance: x.distance,
+        time: x.elapsed_time,
+        elevation: x.elevation_difference ?? 0,
+        hr: x.average_heartrate,
+      })),
+    };
+    updateDb((db) => {
+      db.activityDetails = { ...db.activityDetails, [activityId]: detail };
+    });
+    return detail;
+  } catch (e) {
+    console.error("[strava detail]", e);
+    return null;
+  }
+}
+
 export function disconnectStrava() {
   updateDb((db) => {
     db.settings.strava = undefined;
     db.activities = db.activities.filter((a) => a.source !== "strava");
     db.gear = (db.gear ?? []).filter((g) => g.source !== "strava");
+    db.activityDetails = undefined;
   });
 }

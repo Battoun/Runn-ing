@@ -30,7 +30,11 @@ export function ProfileForm({ profile }: { profile: Profile }) {
         <input className="input" name="fcRepos" inputMode="numeric" defaultValue={profile.fcRepos} />
       </div>
       <div className="col-span-2">
-        <label className="label">Ville (pour la météo)</label>
+        <label className="label">Date de naissance (catégorie FFA des courses)</label>
+        <input className="input" type="date" name="birthDate" defaultValue={profile.birthDate} />
+      </div>
+      <div className="col-span-2">
+        <label className="label">Ville (météo et distance des courses dans Découvrir)</label>
         <input className="input" name="city" defaultValue={profile.city} placeholder="ex : Lyon" />
       </div>
       <div className="col-span-2 flex items-center gap-3">

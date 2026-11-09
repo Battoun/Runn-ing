@@ -31,6 +31,7 @@ export async function saveProfile(_: State, form: FormData): Promise<State> {
       vma: num(form.get("vma")),
       fcMax: num(form.get("fcMax")),
       fcRepos: num(form.get("fcRepos")),
+      birthDate: /^\d{4}-\d{2}-\d{2}$/.test(String(form.get("birthDate"))) ? String(form.get("birthDate")) : undefined,
       ...geo,
     };
   });

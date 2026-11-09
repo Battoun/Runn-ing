@@ -63,17 +63,40 @@ export type Race = {
   // résultat
   rankOverall?: number;
   finishersOverall?: number;
-  category?: string; // ex : SEH, M0H
+  category?: string; // ex : Espoir, M0 (voir RACE_CATEGORIES)
   rankCategory?: number;
   finishersCategory?: number;
   rankGender?: number;
   finishersGender?: number;
   feeling?: number; // 1 à 5
   resultsUrl?: string;
+  activityId?: string | null; // sortie Strava de la course (null = aucune, absent = détection auto)
+  gearId?: string; // chaussures portées / prévues
+};
+
+/** Détail d'une sortie Strava (splits au km), mis en cache pour l'analyse de course */
+export type ActivityDetail = {
+  elapsedTime: number; // s, chrono total (pauses comprises)
+  movingTime: number;
+  distance: number; // m
+  elevation: number; // m D+
+  avgHr?: number;
+  splits: { distance: number; time: number; elevation: number; hr?: number }[]; // time = elapsed, elevation = dénivelé net du km
 };
 
 export const RACE_TERRAINS = ["Route", "Trail", "Piste", "Cross"] as const;
 export type RaceTerrain = (typeof RACE_TERRAINS)[number];
+
+/** Catégories d'âge FFA (le classement H/F est saisi à part) */
+export const RACE_CATEGORIES = [
+  { v: "Benjamin", l: "Benjamin (BE) — 12-13 ans" },
+  { v: "Minime", l: "Minime (MI) — 14-15 ans" },
+  { v: "Cadet", l: "Cadet (CA) — 16-17 ans" },
+  { v: "Junior", l: "Junior (JU) — 18-19 ans" },
+  { v: "Espoir", l: "Espoir (ES) — 20-22 ans" },
+  { v: "Senior", l: "Senior (SE) — 23-34 ans" },
+  ...Array.from({ length: 11 }, (_, i) => ({ v: `M${i}`, l: `Master M${i} — ${35 + i * 5}${i < 10 ? `-${39 + i * 5}` : "+"} ans` })),
+] as const;
 
 export const BREAK_KINDS = ["Blessure", "Maladie", "Vacances", "Pause"] as const;
 export type BreakKind = (typeof BREAK_KINDS)[number];
@@ -122,10 +145,34 @@ export type Profile = {
   fcMax?: number;
   fcRepos?: number;
   vma?: number; // km/h
+  birthDate?: string; // YYYY-MM-DD, pour la catégorie FFA
   city?: string;
   lat?: number;
   lon?: number;
 };
+
+/** Course trouvée sur un site de calendrier (page Découvrir) */
+export type DiscoverEvent = {
+  id: string; // "rl-<id>" (running.life) ou "ade-<sous-domaine>" (Adeorun)
+  name: string;
+  date: string; // YYYY-MM-DD
+  endDate?: string;
+  city: string;
+  dept?: string; // ex : "62"
+  lat?: number;
+  lon?: number;
+  kinds: string[]; // Route, Trail, Cross, Urban trail…
+  distances: string[]; // "10 km", "Semi-marathon"…
+  full?: boolean; // complet / inscriptions closes
+  url: string; // lien officiel si connu, sinon fiche du calendrier
+  sources: { name: string; url: string }[];
+  description?: string;
+  offers?: { name: string; price: number }[];
+  enriched?: boolean; // fiche détaillée déjà lue
+  firstSeen: string; // ISO, pour repérer les nouveautés
+};
+
+export type DiscoverChoice = "yes" | "maybe" | "no";
 
 export type DB = {
   users: User[];
@@ -134,5 +181,7 @@ export type DB = {
   sessions: PlannedSession[];
   breaks: Break[];
   gear: Gear[];
+  activityDetails?: Record<string, ActivityDetail>;
+  discover?: { updatedAt?: string; events: DiscoverEvent[]; choices: Record<string, DiscoverChoice> };
   settings: { profile: Profile; strava?: StravaLink };
 };

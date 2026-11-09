@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/calendrier", label: "Calendrier", icon: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" },
   { href: "/activites", label: "Activités", icon: "M3 12h4l3-8 4 16 3-8h4" },
   { href: "/courses", label: "Courses", icon: "M5 21V4M5 4h12l-2 4 2 4H5" },
+  { href: "/decouvrir", label: "Découvrir", icon: "M12 21a9 9 0 100-18 9 9 0 000 18zM15.5 8.5l-2 5-5 2 2-5z" },
   { href: "/equipement", label: "Équipement", icon: "M3 17h13l5-2v-2l-6-1-3-5H8L6 12H3zM3 17v2h18v-4" },
   { href: "/outils", label: "Outils", icon: "M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { href: "/parametres", label: "Paramètres", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z" },
@@ -68,7 +69,7 @@ export function Nav({ username, logout }: { username: string; logout: () => Prom
           <button className="text-xs text-ink-2">Déconnexion</button>
         </form>
       </header>
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 grid grid-cols-7 border-t border-line bg-surface">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 grid grid-cols-8 border-t border-line bg-surface">
         {LINKS.map((l) => (
           <Link key={l.href} href={l.href} className={`flex flex-col items-center gap-0.5 py-2 text-[9px] ${active(l.href) ? "text-accent" : "text-muted"}`}>
             <Icon d={l.icon} />
