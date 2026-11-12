@@ -1,7 +1,9 @@
 import { readDb } from "@/lib/db";
 import { appUrl, stravaConfigured } from "@/lib/strava";
+import { AUTO_SYNC_EVERY, autoSyncStatus } from "@/lib/autosync";
 import { Card, PageHeader } from "@/components/ui";
-import { PasswordForm, ProfileForm, SyncForm } from "./Forms";
+import { currentSummary, listBackups } from "@/lib/backup";
+import { BackupPanel, PasswordForm, ProfileForm, SyncForm } from "./Forms";
 import { unlinkStrava } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ strava?: string }> }) {
@@ -9,6 +11,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const db = readDb();
   const link = db.settings.strava;
   const count = db.activities.filter((a) => a.source === "strava").length;
+  const auto = autoSyncStatus();
 
   return (
     <>
@@ -49,6 +52,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                   </div>
                 </div>
               </div>
+              <p className="text-xs text-ink-2">
+                🔄 Synchro automatique toutes les heures tant que l&apos;app tourne
+                {link.lastSync && (
+                  <>
+                    {" "}· prochaine vers{" "}
+                    {new Date(Math.max(Date.now(), new Date(link.lastSync).getTime() + AUTO_SYNC_EVERY)).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                  </>
+                )}
+                {auto?.error && <span className="block text-critical">Dernier essai auto en échec : {auto.error}</span>}
+              </p>
               <SyncForm />
               <form action={unlinkStrava}>
                 <button className="text-xs text-critical hover:underline cursor-pointer">Déconnecter Strava (supprime les sorties importées)</button>
@@ -70,6 +83,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
         <Card title="Mot de passe">
           <PasswordForm />
+        </Card>
+
+        <Card title="Mes données & sauvegardes">
+          <BackupPanel backups={listBackups().map((b) => ({ ...b, date: b.date.toISOString() }))} current={currentSummary()} />
         </Card>
       </div>
     </>

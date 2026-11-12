@@ -71,3 +71,14 @@ export async function deleteRace(form: FormData) {
   revalidatePath("/", "layout");
   redirect("/courses");
 }
+
+/** Rappel du tableau de bord : « je suis inscrit » */
+export async function markRegistered(form: FormData) {
+  await requireSession();
+  const id = String(form.get("id"));
+  updateDb((db) => {
+    const r = db.races.find((x) => x.id === id);
+    if (r) r.registered = true;
+  });
+  revalidatePath("/", "layout");
+}

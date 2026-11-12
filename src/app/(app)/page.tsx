@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { getActivities, getWeather, weatherIcon } from "@/lib/data";
@@ -10,6 +11,8 @@ import { budgetByYear, fmtEuro, raceCost } from "@/lib/budget";
 import { BREAK_ICON, breakStatus } from "@/lib/breaks";
 import { gearKm, wear } from "@/lib/gear";
 import { effortKm, raceSpecs } from "@/lib/races";
+import { registrationReminders } from "@/lib/reminders";
+import { markRegistered } from "./courses/actions";
 
 export default async function Dashboard() {
   const session = await getSession();
@@ -40,7 +43,12 @@ export default async function Dashboard() {
     .filter((g) => !g.retired)
     .map((g) => ({ g, w: wear(g) }))
     .filter((x) => x.w && x.w.pct >= 80);
-  const weather = await getWeather(profile.lat, profile.lon, profile.city);
+  const reminders = registrationReminders(db, now);
+  // ville principale + 2e ville (Paramètres), même carte
+  const weathers = (
+    await Promise.all([getWeather(profile.lat, profile.lon, profile.city), getWeather(profile.lat2, profile.lon2, profile.city2)])
+  ).filter((w): w is NonNullable<typeof w> => w != null);
+  const short = (c: string) => c.split(",")[0];
 
   const greeting = now.getHours() < 12 ? "Bonjour" : now.getHours() < 18 ? "Bon après-midi" : "Bonsoir";
 
@@ -72,6 +80,35 @@ export default async function Dashboard() {
             )}
           </div>
           <Link href="/calendrier" className="text-xs text-accent font-medium">Gérer →</Link>
+        </div>
+      )}
+
+      {reminders.length > 0 && (
+        <div className="mb-6 card divide-y divide-line">
+          {reminders.map(({ race, days, tone, reason, minPrice }) => (
+            <div key={race.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                <span>📝</span>
+                <StatusPill tone={tone}>{days === 0 ? "Aujourd'hui" : `J-${days}`}</StatusPill>
+                <strong className="truncate">{race.name.trim()}</strong>
+                <span className="text-ink-2">
+                  pas encore inscrit · {reason}
+                  {minPrice ? ` · dès ${fmtEuro(minPrice)}` : ""}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs font-medium">
+                {race.url && (
+                  <a href={race.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    S&apos;inscrire ↗
+                  </a>
+                )}
+                <form action={markRegistered}>
+                  <input type="hidden" name="id" value={race.id} />
+                  <button className="cursor-pointer text-good hover:underline">✓ Je suis inscrit</button>
+                </form>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -136,6 +173,7 @@ export default async function Dashboard() {
             {loadPaused ? <StatusPill tone="neutral">En pause</StatusPill> : <StatusPill tone={load.status.tone}>{load.status.label}</StatusPill>}
           </div>
           <p className="mt-3 text-xs text-ink-2">{loadPaused ? "Charge non significative pendant une pause." : load.status.hint}</p>
+          <LoadGauge ratio={loadPaused ? null : load.ratio} chronic={load.chronic} acute={load.acute} />
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-lg bg-surface-2 p-2">
               <div className="text-muted">7 derniers jours</div>
@@ -149,23 +187,36 @@ export default async function Dashboard() {
         </Card>
 
         {/* Météo */}
-        <Card title={weather?.city ? `Météo · ${weather.city}` : "Météo du jour"}>
-          {weather ? (
+        <Card title={weathers.length ? `Météo · ${weathers.map((w) => short(w.city)).join(" & ")}` : "Météo du jour"}>
+          {weathers.length ? (
             <>
-              {weather.best && (
-                <p className="text-sm mb-3">
-                  Meilleur créneau : <strong>{new Date(weather.best.time).getHours()}h</strong>{" "}
-                  <span className="text-ink-2">({weather.best.temp}°C, pluie {weather.best.rain}%)</span>
-                </p>
-              )}
-              <div className="grid grid-cols-6 gap-1 text-center text-xs">
-                {weather.hours.slice(0, 12).filter((_, i) => i % 2 === 0).map((h) => (
-                  <div key={h.time} className="rounded-lg bg-surface-2 py-2">
-                    <div className="text-muted">{new Date(h.time).getHours()}h</div>
-                    <div className="text-lg leading-6">{weatherIcon(h.code)}</div>
-                    <div className="font-semibold">{h.temp}°</div>
-                    <div className="text-muted">{h.rain}%</div>
-                  </div>
+              <p className="text-sm mb-2">
+                Meilleur créneau :{" "}
+                {weathers.map((w, i) => (
+                  <span key={w.city}>
+                    {i > 0 && <span className="text-muted"> · </span>}
+                    {weathers.length > 1 && <span className="text-ink-2">{short(w.city)} </span>}
+                    <strong>{w.best ? `${new Date(w.best.time).getHours()}h` : "–"}</strong>
+                    {w.best && <span className="text-ink-2"> ({w.best.temp}°C, {w.best.rain}%)</span>}
+                  </span>
+                ))}
+              </p>
+              {/* heures en colonnes, une ligne par ville */}
+              <div className="grid grid-cols-[3.5rem_repeat(6,minmax(0,1fr))] gap-1 text-center text-xs">
+                <div />
+                {weathers[0].hours.slice(0, 12).filter((_, i) => i % 2 === 0).map((h) => (
+                  <div key={h.time} className="text-muted">{new Date(h.time).getHours()}h</div>
+                ))}
+                {weathers.map((w) => (
+                  <Fragment key={w.city}>
+                    <div className="self-center truncate text-left font-medium text-ink-2" title={w.city}>{short(w.city)}</div>
+                    {w.hours.slice(0, 12).filter((_, i) => i % 2 === 0).map((h) => (
+                      <div key={h.time} className="rounded-lg bg-surface-2 py-1" title={`${h.temp}°C · pluie ${h.rain}% · vent ${h.wind} km/h`}>
+                        <div className="leading-5"><span className="text-base">{weatherIcon(h.code)}</span> <span className="font-semibold">{h.temp}°</span></div>
+                        <div className={`text-[10px] ${h.rain >= 30 ? "font-semibold text-[var(--series-1)]" : "text-muted"}`}>{h.rain}%</div>
+                      </div>
+                    ))}
+                  </Fragment>
                 ))}
               </div>
             </>
@@ -277,6 +328,61 @@ function RaceTeaser({ race, prediction }: { race: import("@/lib/types").Race; pr
           {prediction && <div className="text-muted">{fmtPace(prediction / race.distanceKm)}/km</div>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// zones du ratio aigu / chronique (mêmes seuils que trainingLoad)
+const LOAD_ZONES = [
+  { from: 0, to: 0.8, label: "En baisse", color: "var(--series-1)" },
+  { from: 0.8, to: 1.3, label: "Optimale", color: "var(--good)" },
+  { from: 1.3, to: 1.5, label: "Élevée", color: "var(--warning)" },
+  { from: 1.5, to: 2, label: "Risque", color: "var(--critical)" },
+];
+const LOAD_MAX = 2;
+
+/** Jauge colorée du ratio + km sur 7 j correspondant à chaque zone, d'après ta moyenne (ou un exemple à 30 km/sem) */
+function LoadGauge({ ratio, chronic, acute }: { ratio: number | null; chronic: number; acute: number }) {
+  const base = chronic > 0 ? chronic : 30;
+  const pct = (r: number) => `${(Math.min(r, LOAD_MAX) / LOAD_MAX) * 100}%`;
+  const km = (r: number) => fmtNum(base * r, 0);
+  const left = ratio != null && chronic > 0 ? base * 1.3 - acute : null;
+  return (
+    <div className="mt-3">
+      <div className="relative pt-5">
+        {ratio != null && (
+          <div className="absolute top-0 -translate-x-1/2 text-[10px] font-bold" style={{ left: pct(ratio) }}>
+            {ratio.toFixed(2)}
+            <div className="mx-auto h-0 w-0 border-x-4 border-t-4 border-x-transparent border-t-current" />
+          </div>
+        )}
+        <div className="flex h-2.5 overflow-hidden rounded-full">
+          {LOAD_ZONES.map((z) => (
+            <div key={z.label} style={{ width: pct(z.to - z.from), background: z.color }} title={`${z.label} : ${z.from}–${z.to}`} />
+          ))}
+        </div>
+        <div className="relative mt-1 h-3 text-[10px] text-muted">
+          {[0.8, 1.3, 1.5].map((t) => (
+            <span key={t} className="absolute -translate-x-1/2" style={{ left: pct(t) }}>{t.toLocaleString("fr-FR")}</span>
+          ))}
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+        {LOAD_ZONES.map((z, i) => (
+          <div key={z.label} className="flex items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: z.color }} />
+            <span className="text-ink-2">{z.label}</span>
+            <span className="ml-auto font-medium">
+              {i === 0 ? `< ${km(z.to)}` : i === LOAD_ZONES.length - 1 ? `> ${km(z.from)}` : `${km(z.from)}–${km(z.to)}`} km
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted">
+        {chronic > 0
+          ? `Km sur 7 jours pour ta moyenne de ${fmtNum(chronic, 0)} km/sem.${left != null && left > 0 ? ` Encore ${fmtNum(left, 0)} km possibles en restant dans la zone optimale.` : ""}`
+          : "Exemple pour quelqu'un qui court 30 km/sem en moyenne."}
+      </p>
     </div>
   );
 }

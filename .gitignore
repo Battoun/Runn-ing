@@ -6,3 +6,4 @@ data/*.json
 next-env.d.ts
 *.tsbuildinfo
 .next-test
+data/backups/

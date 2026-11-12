@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { readDb } from "@/lib/db";
 import { dateKey, parseKey } from "@/lib/format";
-import { distanceKm, enrichPending, parseKm, startEnrichment } from "@/lib/discover";
+import { distanceKm, enrichPending, findRace, parseKm, startEnrichment } from "@/lib/discover";
 import { fmtEuro } from "@/lib/budget";
 import type { DiscoverChoice, DiscoverEvent, Race } from "@/lib/types";
 import { PageHeader } from "@/components/ui";
@@ -16,6 +16,7 @@ const TABS = [
   { v: "yes", l: "👍 Je veux la faire" },
   { v: "maybe", l: "😐 Neutre" },
   { v: "no", l: "👎 Pas intéressé" },
+  { v: "cal", l: "📅 Dans mon calendrier" },
   { v: "all", l: "Toutes" },
 ] as const;
 
@@ -43,7 +44,12 @@ const RAYONS = [
 export default async function DiscoverPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const db = readDb();
-  const { lat, lon, city } = db.settings.profile;
+  const { lat, lon, city, lat2, lon2, city2 } = db.settings.profile;
+  // distances depuis la ville principale et, si renseignée, la 2e ville
+  const homes = [
+    { city, lat, lon },
+    { city: city2, lat: lat2, lon: lon2 },
+  ].filter((h): h is { city: string | undefined; lat: number; lon: number } => h.lat != null && h.lon != null);
   const disc = db.discover ?? { events: [], choices: {} };
   const today = dateKey(new Date());
   const tab = TABS.some((t) => t.v === sp.tab) ? sp.tab! : "todo";
@@ -52,21 +58,27 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Pro
 
   const events = disc.events
     .filter((e) => (e.endDate ?? e.date) >= today)
-    .map((e) => ({ ...e, km: lat != null && lon != null && e.lat != null && e.lon != null ? distanceKm(lat, lon, e.lat, e.lon) : null }));
+    .map((e) => ({
+      ...e,
+      race: findRace(e, db.races),
+      kms: e.lat != null && e.lon != null ? homes.map((h) => ({ city: h.city?.split(",")[0] ?? "chez toi", km: distanceKm(h.lat, h.lon, e.lat!, e.lon!) })) : [],
+    }));
   const choiceOf = (e: DiscoverEvent) => disc.choices[e.id];
+  const inTab = (e: (typeof events)[number], t: string) =>
+    t === "all" ? true : t === "cal" ? Boolean(e.race) : t === "todo" ? !choiceOf(e) : choiceOf(e) === t;
   const counts = Object.fromEntries(
-    TABS.map((t) => [t.v, events.filter((e) => (t.v === "all" ? true : t.v === "todo" ? !choiceOf(e) : choiceOf(e) === t.v)).length]),
+    TABS.map((t) => [t.v, events.filter((e) => inTab(e, t.v)).length]),
   );
   const isNew = (e: DiscoverEvent) => e.firstSeen === disc.updatedAt && events.some((x) => x.firstSeen !== disc.updatedAt);
   const newCount = events.filter(isNew).length;
 
   const dist = DISTS.find((d) => d.v === (sp.dist ?? "")) ?? DISTS[0];
   const shown = events.filter((e) => {
-    if (tab === "todo" ? choiceOf(e) : tab !== "all" && choiceOf(e) !== tab) return false;
+    if (!inTab(e, tab)) return false;
     if (sp.type === "route" && !e.kinds.includes("Route")) return false;
     if (sp.type === "trail" && !e.kinds.some((k) => ["Trail", "Urban trail", "Cross", "Obstacles"].includes(k))) return false;
     if (dist.v && !e.distances.map(parseKm).some((k) => k != null && k >= dist.min && k < dist.max)) return false;
-    if (sp.rayon && (e.km == null || e.km > Number(sp.rayon))) return false;
+    if (sp.rayon && !e.kms.some((d) => d.km <= Number(sp.rayon))) return false;
     return true;
   });
   const months = new Map<string, typeof shown>();
@@ -101,13 +113,14 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Pro
             Mis à jour le {new Date(disc.updatedAt).toLocaleString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} ·{" "}
             {events.length} courses
             {newCount > 0 && <span className="font-semibold text-accent"> · {newCount} nouvelle{newCount > 1 ? "s" : ""}</span>}
+            {counts.cal > 0 && <span className="font-semibold text-good"> · {counts.cal} déjà dans ton calendrier</span>}
           </span>
         ) : (
           <span>Clique sur « Actualiser » pour charger les courses (les épreuves et prix arrivent ensuite, une fiche toutes les 10 s).</span>
         )}
         {city && (
           <span>
-            · distances depuis {city.split(",")[0]} (
+            · distances depuis {[city, city2].filter(Boolean).map((c) => c!.split(",")[0]).join(" et ")} (
             <Link href="/parametres" className="text-accent hover:underline">changer</Link>)
           </span>
         )}
@@ -166,9 +179,8 @@ export default async function DiscoverPage({ searchParams }: { searchParams: Pro
                 e={e}
                 choice={choiceOf(e)}
                 isNew={isNew(e)}
-                homeCity={city}
                 canAdd={tab === "yes"}
-                race={db.races.find((r) => r.url === e.url)}
+                race={e.race}
               />
             ))}
           </div>
@@ -182,14 +194,12 @@ function EventRow({
   e,
   choice,
   isNew,
-  homeCity,
   canAdd,
   race,
 }: {
-  e: DiscoverEvent & { km: number | null };
+  e: DiscoverEvent & { kms: { city: string; km: number }[] };
   choice?: DiscoverChoice;
   isNew: boolean;
-  homeCity?: string;
   canAdd: boolean;
   race?: Race;
 }) {
@@ -197,7 +207,9 @@ function EventRow({
   const prices = (e.offers ?? []).map((o) => o.price).filter((p) => p > 0);
   const chip = "rounded-full border border-line px-2 py-0.5";
   return (
-    <div className={`flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start ${choice === "no" ? "opacity-60" : ""}`}>
+    <div
+      className={`flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start ${race ? "border-l-4 border-good bg-good/5" : choice === "no" ? "opacity-60" : ""}`}
+    >
       <div className="flex min-w-0 flex-1 gap-3">
         <div className="w-11 shrink-0 text-center">
           <div className="text-[10px] uppercase text-muted">{d.toLocaleDateString("fr-FR", { weekday: "short" })}</div>
@@ -210,11 +222,12 @@ function EventRow({
               {e.name} ↗
             </a>
             {isNew && <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">NOUVEAU</span>}
+            {race && <span className="rounded bg-good/15 px-1.5 py-0.5 text-[10px] font-bold text-good">📅 DANS MON CALENDRIER</span>}
           </div>
           <div className="text-xs text-ink-2">
             {e.city}
             {e.dept ? ` (${e.dept})` : ""}
-            {e.km != null && ` · ${Math.round(e.km)} km de ${homeCity?.split(",")[0] ?? "chez toi"}`}
+            {e.kms.map((d) => ` · ${Math.round(d.km)} km de ${d.city}`).join("")}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
             {e.kinds.map((k) => <span key={k} className={`${chip} text-ink-2`}>{k}</span>)}
@@ -228,12 +241,13 @@ function EventRow({
               {e.offers!.slice(0, 6).map((o) => `${o.name}${o.price > 0 ? ` ${fmtEuro(o.price)}` : ""}`).join(" · ")}
             </p>
           )}
-          {canAdd &&
-            (race ? (
-              <Link href={`/courses?edit=${race.id}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-good hover:underline">
-                ✓ Dans mes courses ({race.distanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} km) · modifier
-              </Link>
-            ) : (
+          {race ? (
+            <Link href={`/courses?edit=${race.id}`} className="mt-2 inline-flex flex-wrap items-center gap-1 text-xs font-medium text-good hover:underline">
+              ✓ « {race.name.trim()} » · {race.distanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} km
+              {race.registered ? " · inscrit" : " · pas encore inscrit"} · voir dans mes courses
+            </Link>
+          ) : (
+            canAdd && (
               <form action={addToRaces} className="mt-2 flex flex-wrap items-center gap-2">
                 <input type="hidden" name="id" value={e.id} />
                 {e.distances.length > 1 && (
@@ -245,7 +259,8 @@ function EventRow({
                 <button className="btn !py-1 text-xs">+ Ajouter à mes courses</button>
                 {!e.distances.length && <span className="text-[11px] text-muted">distance à préciser ensuite (10 km par défaut)</span>}
               </form>
-            ))}
+            )
+          )}
           <div className="mt-1 text-[11px] text-muted">
             Source :{" "}
             {e.sources.map((s, i) => (

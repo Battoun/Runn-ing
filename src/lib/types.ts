@@ -82,6 +82,7 @@ export type ActivityDetail = {
   elevation: number; // m D+
   avgHr?: number;
   splits: { distance: number; time: number; elevation: number; hr?: number }[]; // time = elapsed, elevation = dénivelé net du km
+  bestEfforts?: { name: string; distance: number; time: number }[]; // meilleurs 1 km, 5 km… dans la sortie (Strava), time = elapsed
 };
 
 export const RACE_TERRAINS = ["Route", "Trail", "Piste", "Cross"] as const;
@@ -149,6 +150,10 @@ export type Profile = {
   city?: string;
   lat?: number;
   lon?: number;
+  /** 2e ville, seulement pour les distances dans Découvrir */
+  city2?: string;
+  lat2?: number;
+  lon2?: number;
 };
 
 /** Course trouvée sur un site de calendrier (page Découvrir) */

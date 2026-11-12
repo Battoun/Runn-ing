@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { newId, updateDb } from "@/lib/db";
 import { requireSession } from "@/lib/auth";
-import { refreshDiscover, startEnrichment } from "@/lib/discover";
+import { findRace, refreshDiscover, startEnrichment } from "@/lib/discover";
 import { parseKm } from "@/lib/discover";
 import type { DiscoverChoice, Race } from "@/lib/types";
 
@@ -42,7 +42,7 @@ export async function addToRaces(form: FormData) {
   const distance = String(form.get("distance") ?? "");
   updateDb((db) => {
     const e = db.discover?.events.find((x) => x.id === id);
-    if (!e || db.races.some((r) => r.url === e.url)) return;
+    if (!e || findRace(e, db.races)) return; // déjà dans mes courses
     const km = parseKm(distance) ?? e.distances.map(parseKm).find((k) => k != null) ?? 10;
     const offer = e.offers?.find((o) => parseKm(o.name) === km && o.price > 0 && !/rando|marche/i.test(o.name));
     const terrain: Race["terrain"] = e.kinds.includes("Cross") ? "Cross" : e.kinds.some((k) => k === "Trail" || k === "Urban trail") ? "Trail" : "Route";

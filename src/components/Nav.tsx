@@ -9,6 +9,8 @@ const LINKS = [
   { href: "/calendrier", label: "Calendrier", icon: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4" },
   { href: "/activites", label: "Activités", icon: "M3 12h4l3-8 4 16 3-8h4" },
   { href: "/courses", label: "Courses", icon: "M5 21V4M5 4h12l-2 4 2 4H5" },
+  { href: "/plan", label: "Plan", icon: "M9 3h6v3H9zM6 5h12v16H6zM9 11h6M9 15h4" },
+  { href: "/records", label: "Records", icon: "M8 4h8v5a4 4 0 01-8 0zM8 6H5a3 3 0 003 4M16 6h3a3 3 0 01-3 4M12 13v4M8 21h8M10 17h4" },
   { href: "/decouvrir", label: "Découvrir", icon: "M12 21a9 9 0 100-18 9 9 0 000 18zM15.5 8.5l-2 5-5 2 2-5z" },
   { href: "/equipement", label: "Équipement", icon: "M3 17h13l5-2v-2l-6-1-3-5H8L6 12H3zM3 17v2h18v-4" },
   { href: "/outils", label: "Outils", icon: "M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
@@ -69,7 +71,7 @@ export function Nav({ username, logout }: { username: string; logout: () => Prom
           <button className="text-xs text-ink-2">Déconnexion</button>
         </form>
       </header>
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 grid grid-cols-8 border-t border-line bg-surface">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-20 grid border-t border-line bg-surface" style={{ gridTemplateColumns: `repeat(${LINKS.length}, minmax(0, 1fr))` }}>
         {LINKS.map((l) => (
           <Link key={l.href} href={l.href} className={`flex flex-col items-center gap-0.5 py-2 text-[9px] ${active(l.href) ? "text-accent" : "text-muted"}`}>
             <Icon d={l.icon} />

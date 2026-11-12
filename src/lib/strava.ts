@@ -186,6 +186,39 @@ export async function syncGear(token?: string) {
 }
 
 type StravaSplit = { distance: number; elapsed_time: number; elevation_difference?: number; average_heartrate?: number };
+type StravaBestEffort = { name: string; distance: number; elapsed_time: number };
+
+class RateLimited extends Error {}
+
+/** Lit le détail d'une sortie sur Strava et le met en cache */
+async function fetchDetail(activityId: string): Promise<ActivityDetail | null> {
+  const token = await validToken();
+  const res = await fetch(`https://www.strava.com/api/v3/activities/${activityId.slice(7)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (res.status === 429) throw new RateLimited("Limite d'appels Strava atteinte");
+  if (!res.ok) return null;
+  const a = await res.json();
+  const detail: ActivityDetail = {
+    elapsedTime: a.elapsed_time,
+    movingTime: a.moving_time,
+    distance: a.distance,
+    elevation: a.total_elevation_gain,
+    avgHr: a.average_heartrate,
+    splits: ((a.splits_metric ?? []) as StravaSplit[]).map((x) => ({
+      distance: x.distance,
+      time: x.elapsed_time,
+      elevation: x.elevation_difference ?? 0,
+      hr: x.average_heartrate,
+    })),
+    bestEfforts: ((a.best_efforts ?? []) as StravaBestEffort[]).map((b) => ({ name: b.name, distance: b.distance, time: b.elapsed_time })),
+  };
+  updateDb((db) => {
+    db.activityDetails = { ...db.activityDetails, [activityId]: detail };
+  });
+  return detail;
+}
 
 /** Détail d'une sortie (splits au km), mis en cache dans la base : une course passée ne change plus */
 export async function getActivityDetail(activityId: string): Promise<ActivityDetail | null> {
@@ -193,34 +226,49 @@ export async function getActivityDetail(activityId: string): Promise<ActivityDet
   if (cached) return cached;
   if (!activityId.startsWith("strava-") || !readDb().settings.strava) return null;
   try {
-    const token = await validToken();
-    const res = await fetch(`https://www.strava.com/api/v3/activities/${activityId.slice(7)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const a = await res.json();
-    const detail: ActivityDetail = {
-      elapsedTime: a.elapsed_time,
-      movingTime: a.moving_time,
-      distance: a.distance,
-      elevation: a.total_elevation_gain,
-      avgHr: a.average_heartrate,
-      splits: ((a.splits_metric ?? []) as StravaSplit[]).map((x) => ({
-        distance: x.distance,
-        time: x.elapsed_time,
-        elevation: x.elevation_difference ?? 0,
-        hr: x.average_heartrate,
-      })),
-    };
-    updateDb((db) => {
-      db.activityDetails = { ...db.activityDetails, [activityId]: detail };
-    });
-    return detail;
+    return await fetchDetail(activityId);
   } catch (e) {
     console.error("[strava detail]", e);
     return null;
   }
+}
+
+/** Sorties Strava dont on n'a pas encore les best efforts */
+export const missingDetails = () => {
+  const db = readDb();
+  if (!db.settings.strava) return [];
+  return db.activities.filter((a) => a.source === "strava" && !db.activityDetails?.[a.id]?.bestEfforts).map((a) => a.id);
+};
+
+// une seule lecture en tâche de fond à la fois (survit au rechargement à chaud en dev)
+const g = globalThis as unknown as { __runnDetails?: Promise<void> };
+
+/**
+ * Lit en tâche de fond le détail des sorties qui n'en ont pas (records), les plus récentes d'abord.
+ * Strava limite à 100 appels / 15 min : 1 appel toutes les 3 s, 60 max par passage, arrêt net sur 429.
+ */
+export function startDetailBackfill(max = 60) {
+  if (g.__runnDetails || !stravaConfigured()) return;
+  g.__runnDetails = (async () => {
+    const ids = missingDetails().reverse().slice(0, max);
+    for (const id of ids) {
+      try {
+        const d = await fetchDetail(id);
+        // sortie supprimée / privée : on note un détail vide pour ne pas réessayer
+        if (!d)
+          updateDb((db) => {
+            const cur = db.activityDetails?.[id];
+            db.activityDetails = { ...db.activityDetails, [id]: { ...(cur ?? { elapsedTime: 0, movingTime: 0, distance: 0, elevation: 0, splits: [] }), bestEfforts: [] } };
+          });
+      } catch (e) {
+        console.error("[strava records]", e instanceof Error ? e.message : e);
+        if (e instanceof RateLimited) return;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  })().finally(() => {
+    g.__runnDetails = undefined;
+  });
 }
 
 export function disconnectStrava() {
